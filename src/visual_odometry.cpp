@@ -229,6 +229,8 @@ void VisualOdometry::poseEstimationPnP()
         pose->estimate().translation()
     );
     
+    // Eigen::Matrix3d R; Eigen::Quaterniond q(R); // from rotation matrix to quaternion
+    
     cout<<"T_c_w_estimated_: "<<endl<<T_c_w_estimated_.matrix()<<endl;
 }
 
