@@ -32,6 +32,14 @@
 #include <g2o/core/robust_kernel.h>
 #include <g2o/core/robust_kernel_impl.h>
 
+#include <g2o/types/slam3d/types_slam3d.h>
+#include <g2o/core/sparse_optimizer.h>
+#include <g2o/core/factory.h>
+#include <g2o/core/optimization_algorithm_factory.h>
+#include <g2o/core/optimization_algorithm_gauss_newton.h>
+#include <g2o/solvers/eigen/linear_solver_eigen.h>
+
+
 namespace myslam
 {
 class EdgeProjectXYZRGBD : public g2o::BaseBinaryEdge<3, Eigen::Vector3d, g2o::VertexSBAPointXYZ, g2o::VertexSE3Expmap>
@@ -42,7 +50,7 @@ public:
     virtual void linearizeOplus();
     virtual bool read( std::istream& in ){}
     virtual bool write( std::ostream& out) const {}
-    
+
 };
 
 // only to optimize the pose, no point
@@ -53,10 +61,10 @@ public:
     // Error: measure = R*point+t
     virtual void computeError();
     virtual void linearizeOplus();
-    
+
     virtual bool read( std::istream& in ){}
     virtual bool write( std::ostream& out) const {}
-    
+
     Vector3d point_;
 };
 
@@ -64,13 +72,13 @@ class EdgeProjectXYZ2UVPoseOnly: public g2o::BaseUnaryEdge<2, Eigen::Vector2d, g
 {
 public:
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW
-    
+
     virtual void computeError();
     virtual void linearizeOplus();
-    
+
     virtual bool read( std::istream& in ){}
     virtual bool write(std::ostream& os) const {};
-    
+
     Vector3d point_;
     Camera* camera_;
 };
