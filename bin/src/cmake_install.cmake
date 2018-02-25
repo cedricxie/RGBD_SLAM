@@ -1,4 +1,4 @@
-# Install script for directory: /home/cedricxie/Documents/Turtlebot/ROS_Playground/slambook/project/0.4/src
+# Install script for directory: /home/cedricxie/Documents/RGBD/rgbd_slam/src
 
 # Set the install prefix
 if(NOT DEFINED CMAKE_INSTALL_PREFIX)
