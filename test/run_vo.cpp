@@ -20,7 +20,6 @@
 #include <pcl/filters/passthrough.h>
 typedef pcl::PointXYZRGBA PointT;
 typedef pcl::PointCloud<PointT> PointCloud;*/
-
 // 函数接口
 // image2PonitCloud 将rgb图转换为点云
 // PointCloud::Ptr image2PointCloud( cv::Mat& rgb, cv::Mat& depth, myslam::Camera::Ptr camera );
@@ -71,7 +70,7 @@ int main ( int argc, char** argv )
     cv::Affine3d cam_pose = cv::viz::makeCameraPose ( cam_pos, cam_focal_point, cam_y_dir );
     vis.setViewerPose ( cam_pose );
 
-    cv::Size window_size(600, 600);
+    cv::Size window_size(500, 500);
     vis.setWindowSize(window_size);
 
     world_coor.setRenderingProperty ( cv::viz::LINE_WIDTH, 2.0 );
@@ -79,9 +78,12 @@ int main ( int argc, char** argv )
     vis.showWidget ( "World", world_coor );
     vis.showWidget ( "Camera", camera_coor );
 
-    for ( int i=0; i<rgb_files.size() / 10; i++ )
+    for ( int i=0; i<rgb_files.size(); i++ )
     {
         cout<<"****** loop "<<i<<" ******"<<endl;
+        if (i == 2) {
+          std::cin.ignore();
+        }
         Mat color = cv::imread ( rgb_files[i] );
         Mat depth = cv::imread ( depth_files[i], -1 );
         if ( color.data==nullptr || depth.data==nullptr )
@@ -136,6 +138,14 @@ int main ( int argc, char** argv )
         vis.spinOnce ( 1, false );
         cout<<endl;
     }
+
+    // 优化
+    cout << "optimizing pose graph, vertices: " << vo->globalOptimizer_.vertices().size() << endl;
+    vo->globalOptimizer_.save("./result_before.g2o");
+    vo->globalOptimizer_.initializeOptimization();
+    vo->globalOptimizer_.optimize( 100 ); //可以指定优化步数
+    vo->globalOptimizer_.save( "./result_after.g2o" );
+    cout << "optimization done." << endl;
 
     // 拼接点云地图
     /*cout<<"saving the point cloud map..."<<endl;

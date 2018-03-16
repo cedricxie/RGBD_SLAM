@@ -68,8 +68,8 @@ public:
     double key_frame_min_trans; // minimal translation of two key-frames
     double  map_point_erase_ratio_; // remove map point ratio
 
-    g2o::SparseOptimizer optimizer;
-    g2o::SparseOptimizer globalOptimizer;
+    //g2o::SparseOptimizer optimizer_;
+    g2o::SparseOptimizer globalOptimizer_;
 
 public: // functions
     VisualOdometry();

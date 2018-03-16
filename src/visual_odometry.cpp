@@ -44,22 +44,25 @@ VisualOdometry::VisualOdometry() :
     orb_ = cv::ORB::create ( num_of_features_, scale_factor_, level_pyramid_ );
 
     // define local optimizer
-    typedef g2o::BlockSolver<g2o::BlockSolverTraits<6,2>> Block;
+    /*typedef g2o::BlockSolver<g2o::BlockSolverTraits<6,2>> Block;
     Block::LinearSolverType* linearSolver = new g2o::LinearSolverDense<Block::PoseMatrixType>();
     Block* solver_ptr = new Block ( linearSolver );
     g2o::OptimizationAlgorithmLevenberg* solver = new g2o::OptimizationAlgorithmLevenberg ( solver_ptr );
-    optimizer.setAlgorithm ( solver );
+    optimizer.setAlgorithm ( solver );*/
 
     // define global optimizer
-    typedef g2o::BlockSolver< g2o::BlockSolverTraits<6,3> > globalBlock;
-    globalBlock::LinearSolverType* globalLinearSolver = new g2o::LinearSolverEigen< globalBlock::PoseMatrixType >();
+    typedef g2o::BlockSolver< g2o::BlockSolverTraits<6,6> > globalBlock;
+    //typedef g2o::BlockSolver_6_3 globalBlock;
+    //globalBlock::LinearSolverType* globalLinearSolver = new g2o::LinearSolverEigen< globalBlock::PoseMatrixType >();
+    //globalLinearSolver->setBlockOrdering( false );
     //globalBlock::LinearSolverType* globalLinearSolver = new g2o::LinearSolverCSparse<globalBlock::PoseMatrixType>(); // 线性方程求解器
+    globalBlock::LinearSolverType* globalLinearSolver = new g2o::LinearSolverDense<globalBlock::PoseMatrixType>();
+    //globalBlock::LinearSolverType* globalLinearSolver = new g2o::LinearSolverCholmod< globalBlock::PoseMatrixType >();
     globalBlock* global_solver_ptr = new globalBlock ( globalLinearSolver );     // 矩阵块求解器
-    //linearSolver->setBlockOrdering( false );
     g2o::OptimizationAlgorithmLevenberg* globalSolver = new g2o::OptimizationAlgorithmLevenberg ( global_solver_ptr );
-    globalOptimizer.setAlgorithm( globalSolver );
+    globalOptimizer_.setAlgorithm( globalSolver );
     // 不要输出调试信息
-    //globalOptimizer.setVerbose( false );
+    globalOptimizer_.setVerbose( true );
 }
 
 VisualOdometry::~VisualOdometry()
@@ -106,6 +109,11 @@ bool VisualOdometry::addFrame ( Frame::Ptr frame )
             {
                 state_ = LOST;
             }
+            if ( num_lost_ > max_num_lost_ / 4 )
+            {
+                optimizeMap();
+            }
+            cout << "num_lost_: " << num_lost_ << endl;
             return false;
         }
         break;
@@ -209,14 +217,14 @@ void VisualOdometry::poseEstimationPnP()
         return;
     }
     // using bundle adjustment to optimize the pose; moved to initialization
-    /*typedef g2o::BlockSolver<g2o::BlockSolverTraits<6,2>> Block;
+    typedef g2o::BlockSolver<g2o::BlockSolverTraits<6,2>> Block;
     Block::LinearSolverType* linearSolver = new g2o::LinearSolverDense<Block::PoseMatrixType>();
     Block* solver_ptr = new Block ( linearSolver );
     g2o::OptimizationAlgorithmLevenberg* solver = new g2o::OptimizationAlgorithmLevenberg ( solver_ptr );
     g2o::SparseOptimizer optimizer;
-    optimizer.setAlgorithm ( solver );*/
+    optimizer.setAlgorithm ( solver );
 
-    optimizer.clear(); // reset optimizer
+    //optimizer.clear(); // reset optimizer
 
     g2o::VertexSE3Expmap* pose = new g2o::VertexSE3Expmap();
     pose->setId ( 0 );
@@ -244,6 +252,8 @@ void VisualOdometry::poseEstimationPnP()
 
     optimizer.initializeOptimization();
     optimizer.optimize ( 200 );
+    //cout << "optimizing local pose graph, edges: " << optimizer.edges().size() << endl;
+    //optimizer.save("./local_result_before.g2o");
 
     T_c_w_estimated_ = SE3 (
         pose->estimate().rotation(),
@@ -264,11 +274,12 @@ bool VisualOdometry::checkEstimatedPose()
     // if the motion is too large, it is probably wrong
     SE3 T_r_c = ref_->T_c_w_ * T_c_w_estimated_.inverse();
     Sophus::Vector6d d = T_r_c.log();
-    if ( d.norm() > 5.0 )
+    if ( d.norm() > 20.0 )
     {
         cout<<"reject because motion is too large: "<<d.norm() <<endl;
         return false;
     }
+    cout<<"accept with motion: "<<d.norm() <<endl;
     return true;
 }
 
@@ -279,8 +290,10 @@ bool VisualOdometry::checkKeyFrame()
     Vector3d trans = d.head<3>();
     Vector3d rot = d.tail<3>();
     if ( rot.norm() >key_frame_min_rot || trans.norm() >key_frame_min_trans ) {
+        cout<< "IS a key frame" <<endl;
         return true;
     }
+    cout<< "NOT a key frame" <<endl;
     return false;
 }
 
@@ -289,34 +302,69 @@ void VisualOdometry::addKeyFrame()
     // add vertex
     g2o::VertexSE3 *v = new g2o::VertexSE3();
     v->setId( curr_->id_ );
-    v->setEstimate( Eigen::Isometry3d::Identity() );
-    globalOptimizer.addVertex(v);
+    v->setEstimate( Eigen::Isometry3d::Identity() ); //估计为单位矩阵
+    /*v->setEstimate( g2o::SE3Quat(
+        Eigen::Matrix3d::Identity(),
+        Eigen::Vector3d( 0,0,0 )
+    ) );*/
+    /*SE3 T_w_c = curr_->T_c_w_.inverse();
+    v->setEstimate( g2o::SE3Quat(
+      T_w_c.rotation_matrix(), T_w_c.translation()
+    ) );*/
+    globalOptimizer_.addVertex(v);
 
     if (curr_->id_ != ref_->id_) {
       // 边部分
       g2o::EdgeSE3* edge = new g2o::EdgeSE3();
       // 连接此边的两个顶点id
-      edge->setVertex( 0, globalOptimizer.vertex(ref_->id_ ));
-      edge->setVertex( 1, globalOptimizer.vertex(curr_->id_ ));
-      edge->setRobustKernel( new g2o::RobustKernelHuber() );
+      //edge->setVertex( 0, globalOptimizer_.vertex(ref_->id_ ));
+      //edge->setVertex( 1, globalOptimizer_.vertex(curr_->id_ ));
+      edge->vertices() [0] = globalOptimizer_.vertex( ref_->id_ );
+      edge->vertices() [1] = globalOptimizer_.vertex( curr_->id_ );
+      // edge->setRobustKernel( new g2o::RobustKernelHuber() );
       // 信息矩阵
-      Eigen::Matrix<double, 6, 6> information = Eigen::Matrix< double, 6,6 >::Identity();
+      Eigen::Matrix<double, 6, 6> information = Eigen::Matrix< double, 6,6 >::Identity() * 100;
+      //Eigen::Matrix<double, 6, 6> information;
+      /*information << 1,  2,  3,  4,  5,  6,
+                     7,  8,  9,  10, 11, 12,
+                     13, 14, 15, 16, 17, 18,
+                     19, 20, 21, 22, 23, 24,
+                     25, 26, 27, 28, 29, 30,
+                     31, 32, 33, 34, 35, 36;*/
+      /*information << 100,  0,  100,  0,   0,   0,
+                     0,    0,  0,    100, 0,   0,
+                     0,    0,  0,    0,   100, 0,
+                     0,    0,  0,    0,   0,   100,
+                     0,    0,  0,    0,   0,   0,
+                     100,  0,  0,    0,   0,   0;*/
+     /*information << 1,    0,  1,    0,   0,   0,
+                    0,    0,  0,    1,   0,   0,
+                    0,    0,  0,    0,   1,   0,
+                    0,    0,  0,    0,   0,   1,
+                    0,    0,  0,    0,   0,   0,
+                    1,    0,  0,    0,   0,   0;*/
+      cout << "information matrix:" << endl;
       // 信息矩阵是协方差矩阵的逆，表示我们对边的精度的预先估计
       // 因为pose为6D的，信息矩阵是6*6的阵，假设位置和角度的估计精度均为0.1且互相独立
       // 那么协方差则为对角为0.01的矩阵，信息阵则为100的矩阵
-      information(0,0) = information(1,1) = information(2,2) = 100;
-      information(3,3) = information(4,4) = information(5,5) = 100;
+      //information(0,0) = 100;
+      //information(1,1) = 100;
+      //information(2,2) = 100;
+      //information(3,3) = 100;
+      //information(4,4) = 100;
+      //information(5,5) = 100;
       // 也可以将角度设大一些，表示对角度的估计更加准确
-      edge->setInformation( information );
+      edge->setInformation( information);
+      cout << edge->information() << endl;
       // 边的估计即是pnp求解之结果
       SE3 T_r_c = ref_->T_c_w_ * curr_->T_c_w_.inverse();
       Eigen::Isometry3d T;
       T.translation() = T_r_c.translation();
       T.linear() = T_r_c.rotation_matrix();
-      // edge->setMeasurement( T.inverse() );
+      //edge->setMeasurement( T.inverse() );
       edge->setMeasurement( T );
       // 将此边加入图中
-      globalOptimizer.addEdge(edge);
+      globalOptimizer_.addEdge(edge);
     }
     else {
         v->setFixed( true ); //第一个顶点固定，不用优化
@@ -403,7 +451,7 @@ void VisualOdometry::optimizeMap()
         iter++;
     }
 
-    if ( match_2dkp_index_.size()<100 || map_->map_points_.size() < 100)
+    if ( match_2dkp_index_.size()<1000 || map_->map_points_.size() < 1000)
         addMapPoints();
     if ( map_->map_points_.size() > 1000 )
     {
